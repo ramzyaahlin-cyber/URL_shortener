@@ -53,6 +53,14 @@ def test_custom_alias_conflict_returns_409(client: TestClient):
     assert second.json()["detail"] == "Custom alias already in use"
 
 
+def test_invalid_custom_alias_returns_422(client: TestClient):
+    response = client.post(
+        "/shorten",
+        json={"url": "https://example.com", "custom_alias": "../../etc/passwd"},
+    )
+    assert response.status_code == 422
+
+
 def test_redirect_for_existing_short_code(client: TestClient):
     create_response = client.post(
         "/shorten",

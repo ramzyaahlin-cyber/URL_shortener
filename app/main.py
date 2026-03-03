@@ -2,9 +2,10 @@ import secrets
 import string
 from contextlib import asynccontextmanager
 from pathlib import Path
+import re
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import AnyHttpUrl, BaseModel, Field
@@ -32,6 +33,8 @@ DEFAULT_CODE_LENGTH = 6
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
+ALIAS_PATTERN = re.compile(r"^[A-Za-z0-9_-]{3,32}$")
+
 
 class ShortenRequest(BaseModel):
     url: AnyHttpUrl
@@ -52,6 +55,16 @@ def build_short_url(request: Request, short_code: str) -> str:
     return str(request.base_url).rstrip("/") + f"/{short_code}"
 
 
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response: Response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'; base-uri 'self'"
+    return response
+
+
 @app.get("/health")
 def health_check() -> dict[str, str]:
     return {"status": "ok"}
@@ -66,6 +79,11 @@ def index() -> FileResponse:
 def create_short_url(payload: ShortenRequest, request: Request) -> ShortenResponse:
     if payload.custom_alias:
         short_code = payload.custom_alias
+        if not ALIAS_PATTERN.fullmatch(short_code):
+            raise HTTPException(
+                status_code=422,
+                detail="Custom alias may only include letters, numbers, '_' and '-'",
+            )
         if short_code_exists(short_code):
             raise HTTPException(status_code=409, detail="Custom alias already in use")
     else:
